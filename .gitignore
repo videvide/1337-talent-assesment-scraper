@@ -1,0 +1,6 @@
+venv
+__pycache__/
+1337.tech
+.pytest_cache
+dist
+*.egg-info
