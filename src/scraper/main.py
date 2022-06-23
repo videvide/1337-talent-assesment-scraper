@@ -1,43 +1,51 @@
 import os
 import re
 import requests
+from tqdm import tqdm
 from urllib.parse import urlsplit
+from concurrent.futures import ThreadPoolExecutor
+
+BASE_DIR = "1337.tech"
+REGEX_PATTERN = r'(href|src|content)\="\/([^#][_\S][\S-]*)"'
+
+urls = set()
 
 
-def scrape(url: str = "https://1337.tech", initial=True):
+def generate_path_and_file_name(url):
     parts = urlsplit(url)
-
-    base_url = "{0.scheme}://{0.netloc}".format(parts)
-
-    base_dir = parts[1]
-
     if parts.path:
-        relative_path, file_name = parts.path.rsplit("/", 1)
+        if parts.query:
+            relative_path = parts.path
+            file_name = parts.query
+        else:
+            relative_path, file_name = parts.path.rsplit("/", 1)
+            relative_path += "/"
     else:
-        relative_path = ""
+        relative_path = "/"
         file_name = "index.html"
 
-    path = base_dir + relative_path + "/"
+    return BASE_DIR + relative_path, file_name
 
-    os.makedirs(path, exist_ok=True)
 
-    regex_pattern = r'(href|src|content)\="\/([^#][_\S][\S-]*)"'
+def create_and_save_response(url: str, initial=False):
+    response = requests.get(url, stream=True)
+    local_path, file_name = generate_path_and_file_name(url)
+    os.makedirs(local_path, exist_ok=True)
+
+    with tqdm(total=len(response.content)) as pbar:
+        with open(local_path + file_name, "wb") as file:
+            for chunk in response.iter_content(16385):
+                file.write(chunk)
+                pbar.update(len(chunk))
 
     if initial:
-        response_content = requests.get(url).content.decode("utf-8")
-        paths = [
-            p[1].replace("amp;", "")
-            for p in re.findall(regex_pattern, response_content)
-        ]
+        urls.update(
+            f"{url}/{path[1].replace('amp;', '')}"
+            for path in re.findall(REGEX_PATTERN, response.content.decode("utf-8"))
+        )
 
-        with open(path + file_name, "w") as file:
-            file.write(response_content)
 
-        for p in paths:
-            u = f"{base_url}/{p}"
-            scrape(u, initial=False)
-
-    else:
-        response_content = requests.get(url).content
-        with open(path + file_name, "wb") as file:
-            file.write(response_content)
+if __name__ == "__main__":
+    create_and_save_response("https://1337.tech", initial=True)
+    with ThreadPoolExecutor() as executor:
+        executor.map(create_and_save_response, urls)
